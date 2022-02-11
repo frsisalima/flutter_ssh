@@ -30,24 +30,34 @@ import java.util.Vector;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
-import io.flutter.plugin.common.EventChannel;
-import io.flutter.plugin.common.EventChannel.EventSink;
-import io.flutter.plugin.common.EventChannel.StreamHandler;
+import androidx.annotation.NonNull;
+
+import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
-import io.flutter.plugin.common.PluginRegistry.Registrar;
+import io.flutter.plugin.common.EventChannel;
+import io.flutter.plugin.common.EventChannel.EventSink;
+import io.flutter.plugin.common.EventChannel.StreamHandler;
 
 /** SshPlugin */
-public class SshPlugin implements MethodCallHandler, StreamHandler {
-  /** Plugin registration. */
-  public static void registerWith(Registrar registrar) {
-    final MethodChannel channel = new MethodChannel(registrar.messenger(), "ssh");
-    final EventChannel eventChannel = new EventChannel(registrar.messenger(), "shell_sftp");
-    final SshPlugin instance = new SshPlugin();
-    channel.setMethodCallHandler(instance);
-    eventChannel.setStreamHandler(instance);
+public class SshPlugin implements FlutterPlugin, MethodCallHandler, StreamHandler {
+  /// The MethodChannel that will the communication between Flutter and native Android
+  ///
+  /// This local reference serves to register the plugin with the Flutter Engine and unregister it
+  /// when the Flutter Engine is detached from the Activity
+  private MethodChannel channel;
+  private EventChannel eventChannel;
+
+  @Override
+  public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
+    channel = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), "ssh");
+    channel.setMethodCallHandler(this);
+
+    eventChannel = new EventChannel(flutterPluginBinding.getBinaryMessenger(), "shell_sftp");
+    eventChannel.setStreamHandler(this);
+
   }
 
   // MethodChannel.Result wrapper that responds on the platform thread.
@@ -63,35 +73,35 @@ public class SshPlugin implements MethodCallHandler, StreamHandler {
     @Override
     public void success(final Object result) {
       handler.post(
-          new Runnable() {
-            @Override
-            public void run() {
-              methodResult.success(result);
-            }
-          });
+              new Runnable() {
+                @Override
+                public void run() {
+                  methodResult.success(result);
+                }
+              });
     }
 
     @Override
     public void error(
-        final String errorCode, final String errorMessage, final Object errorDetails) {
+            final String errorCode, final String errorMessage, final Object errorDetails) {
       handler.post(
-          new Runnable() {
-            @Override
-            public void run() {
-              methodResult.error(errorCode, errorMessage, errorDetails);
-            }
-          });
+              new Runnable() {
+                @Override
+                public void run() {
+                  methodResult.error(errorCode, errorMessage, errorDetails);
+                }
+              });
     }
 
     @Override
     public void notImplemented() {
       handler.post(
-          new Runnable() {
-            @Override
-            public void run() {
-              methodResult.notImplemented();
-            }
-          });
+              new Runnable() {
+                @Override
+                public void run() {
+                  methodResult.notImplemented();
+                }
+              });
     }
   }
 
@@ -136,7 +146,7 @@ public class SshPlugin implements MethodCallHandler, StreamHandler {
   }
 
   @Override
-  public void onMethodCall(MethodCall call, Result rawResult) {
+  public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
     Result result = new MethodResultWrapper(rawResult);
     if (call.method.equals("connectToHost")) {
       connectToHost((HashMap) call.arguments, result);
@@ -180,6 +190,13 @@ public class SshPlugin implements MethodCallHandler, StreamHandler {
       result.notImplemented();
     }
   }
+
+  @Override
+  public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
+    channel.setMethodCallHandler(null);
+  }
+
+
 
   private class SSHClient {
     Session _session;
@@ -294,7 +311,7 @@ public class SshPlugin implements MethodCallHandler, StreamHandler {
       }
     }).start();
   }
-  
+
   private void portForwardL(final HashMap args, final Result result) {
     new Thread(new Runnable()  {
       public void run() {
@@ -302,13 +319,13 @@ public class SshPlugin implements MethodCallHandler, StreamHandler {
           SSHClient client = getClient(args.get("id").toString(), result);
           if (client == null)
             return;
-          
+
           Session session = client._session;
           int rport = Integer.parseInt(args.get("rport").toString());
           int lport = Integer.parseInt(args.get("lport").toString());
           String rhost = args.get("rhost").toString();
           int assinged_port=session.setPortForwardingL(lport, rhost, rport);
-          
+
           result.success(Integer.toString(assinged_port));
         } catch (JSchException error) {
           Log.e(LOGTAG, "Error connecting portforwardL:" + error.getMessage());
@@ -560,7 +577,7 @@ public class SshPlugin implements MethodCallHandler, StreamHandler {
           String path = args.get("path").toString();
           String toPath = args.get("toPath").toString();
           channelSftp.put(path, toPath + '/' + (new File(path)).getName(),
-              new progressMonitor(args.get("id").toString(), "UploadProgress"), ChannelSftp.OVERWRITE);
+                  new progressMonitor(args.get("id").toString(), "UploadProgress"), ChannelSftp.OVERWRITE);
           if (client._uploadContinue == true)
             result.success("upload_success");
           else
@@ -603,16 +620,16 @@ public class SshPlugin implements MethodCallHandler, StreamHandler {
       return;
     client._session.disconnect();
   }
-  
+
   private void isConnected(final HashMap args, final Result result) {
     SSHClient client = clientPool.get(args.get("id"));
     if (client == null) {
-		result.success("false");
+      result.success("false");
     } else if ( client._session == null || ! client._session.isConnected()) {
-		result.success("false");
+      result.success("false");
     } else {
       result.success("true");
-    }   
+    }
   }
 
   private void sendEvent(Map<String, Object> event) {
